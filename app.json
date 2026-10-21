@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Quiet Notes",
+    "slug": "quiet-notes",
+    "scheme": "quietnotes",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "dev.belle.quietnotes",
+      "supportsTablet": true,
+      "deploymentTarget": "16.4"
+    },
+    "android": {
+      "package": "dev.belle.quietnotes"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "cmakeVersion": "3.31.6"
+          }
+        }
+      ],
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true,
+          "useSQLCipher": true
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

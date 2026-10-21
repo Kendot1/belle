@@ -1,0 +1,23 @@
+# Project-local skill manifest
+
+Reviewed and installed on 2026-10-21. Skill source files are preserved under `.agents/skills/`; upstream files were not patched. All three source repositories declare MIT licenses; their license text is copied into each installed skill directory. The repository's AGENTS.md takes precedence over conflicting upstream workflow instructions, including any instruction to delegate.
+
+| ID | Role | Source | Pinned revision / package version | License | Local path | Review date |
+| --- | --- | --- | --- | --- | --- | --- |
+| `expo-native-ui` | iOS-native UI and accessibility | [expo/skills](https://github.com/expo/skills/tree/main/plugins/expo/skills/expo-native-ui) | `55ec65cd16499f20f14fb10fe99a2e62901b00a1`, skill 1.1.1 | MIT | `.agents/skills/expo-native-ui/` | 2026-10-21 |
+| `expo-design-system` | Design tokens and component conventions | [expo/skills](https://github.com/expo/skills/tree/main/plugins/expo/skills/expo-design-system) | `55ec65cd16499f20f14fb10fe99a2e62901b00a1`, skill 1.0.0 | MIT | `.agents/skills/expo-design-system/` | 2026-10-21 |
+| `expo-router` | Expo Router navigation | [expo/skills](https://github.com/expo/skills/tree/main/plugins/expo/skills/expo-router) | `55ec65cd16499f20f14fb10fe99a2e62901b00a1`, skill 1.0.1 | MIT | `.agents/skills/expo-router/` | 2026-10-21 |
+| `expo-project-structure` | Expo file placement | [expo/skills](https://github.com/expo/skills/tree/main/plugins/expo/skills/expo-project-structure) | `55ec65cd16499f20f14fb10fe99a2e62901b00a1`, skill 1.0.0 | MIT | `.agents/skills/expo-project-structure/` | 2026-10-21 |
+| `expo-module` | Expo Swift/Kotlin module API | [expo/skills](https://github.com/expo/skills/tree/main/plugins/expo/skills/expo-module) | `55ec65cd16499f20f14fb10fe99a2e62901b00a1`, skill 1.0.0 | MIT | `.agents/skills/expo-module/` | 2026-10-21 |
+| `expo-dev-client` | Development-build constraints | [expo/skills](https://github.com/expo/skills/tree/main/plugins/expo/skills/expo-dev-client) | `55ec65cd16499f20f14fb10fe99a2e62901b00a1`, skill 1.1.0 | MIT | `.agents/skills/expo-dev-client/` | 2026-10-21 |
+| `brainstorming` | Product/design framing | [obra/superpowers](https://github.com/obra/superpowers/tree/main/skills/brainstorming) | `bb92a77741419a4ab5f06e711a283343f1ada0c3` | MIT | `.agents/skills/brainstorming/` | 2026-10-21 |
+| `writing-plans` | Implementation planning | [obra/superpowers](https://github.com/obra/superpowers/tree/main/skills/writing-plans) | `bb92a77741419a4ab5f06e711a283343f1ada0c3` | MIT | `.agents/skills/writing-plans/` | 2026-10-21 |
+| `test-driven-development` | Test-first implementation | [obra/superpowers](https://github.com/obra/superpowers/tree/main/skills/test-driven-development) | `bb92a77741419a4ab5f06e711a283343f1ada0c3` | MIT | `.agents/skills/test-driven-development/` | 2026-10-21 |
+| `systematic-debugging` | Evidence-led failure analysis | [obra/superpowers](https://github.com/obra/superpowers/tree/main/skills/systematic-debugging) | `bb92a77741419a4ab5f06e711a283343f1ada0c3` | MIT | `.agents/skills/systematic-debugging/` | 2026-10-21 |
+| `requesting-code-review` | Review checklist | [obra/superpowers](https://github.com/obra/superpowers/tree/main/skills/requesting-code-review) | `bb92a77741419a4ab5f06e711a283343f1ada0c3` | MIT | `.agents/skills/requesting-code-review/` | 2026-10-21 |
+| `verification-before-completion` | Verification discipline | [obra/superpowers](https://github.com/obra/superpowers/tree/main/skills/verification-before-completion) | `bb92a77741419a4ab5f06e711a283343f1ada0c3` | MIT | `.agents/skills/verification-before-completion/` | 2026-10-21 |
+| `security-audit` | Defensive source review | [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill/tree/main/skills/security-audit) | `c1c8a8c1471069fb0e188eeaff69b8e8db6564a8` | MIT | `.agents/skills/security-audit/` | 2026-10-21 |
+
+## Review notes
+
+The source repositories, root licenses, complete required `SKILL.md` files, packaged references, scripts, and declared agent metadata were inspected at the pinned commits. Expo modules guidance confirms the local Swift module/autolinking development-build path; router and UI references were checked against the existing design system. Superpowers scripts include an optional local HTTP visual companion and process/file cleanup helpers; the security package includes source validators and tests. None of those upstream scripts or tests were executed. The security skill describes a separate multi-agent full-audit workflow; this task uses only its relevant defensive review guidance because the project instructions prohibit delegation and the request is an implementation with a focused security review, not a full audit.
