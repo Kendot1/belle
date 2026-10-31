@@ -10,7 +10,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ActionButton } from '../../core/components/ActionButton';
 import { useNotesService } from '../../core/database/context';
 import { createAnnotationAnchor, editorPositionToPlainTextOffset, plainTextOffsetToEditorPosition, resolveAnnotationAnchor, type AnnotationAnchor } from '../../features/annotations/anchor';
-import { isAIInputWithinLimit, MAX_AI_INPUT_LENGTH, type AIAction, type AIAvailability } from '../../features/ai/provider';
+import {
+  isAIInputWithinLimit,
+  LOCAL_MODEL,
+  MAX_AI_INPUT_LENGTH,
+  type AIAction,
+  type AIAvailability,
+  type AIGenerationStage,
+  type AIModelProgress,
+} from '../../features/ai/provider';
 import type { Annotation } from '../../features/notes/service';
 import { COLLECTIONS, EMPTY_DOCUMENT, type EditorNode, type Note, type VersionedEditorDocument, plainTextFromDocument } from '../../features/notes/types';
 import { useAIProvider } from '../../features/ai/context';
@@ -50,6 +58,12 @@ function anchorLabel(status: 'attached' | 'ambiguous' | 'missing'): string {
   return 'Quote no longer found';
 }
 
+function modelDownloadErrorMessage(error: unknown): string {
+  if (error instanceof Error && /free space/i.test(error.message)) return error.message;
+  if (error instanceof Error && /integrity check/i.test(error.message)) return error.message;
+  return 'The local model could not be downloaded. Check your connection and try again; your notes are unchanged.';
+}
+
 export default function NoteEditorScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = typeof params.id === 'string' ? params.id : '';
@@ -70,6 +84,9 @@ export default function NoteEditorScreen() {
   const pendingSourceSelection = useRef<{ from: number; to: number } | null>(null);
   const [aiAvailability, setAiAvailability] = useState<AIAvailability>({ available: false, status: 'checking', message: 'Checking whether on-device AI is ready…' });
   const [activeRequest, setActiveRequest] = useState<string | null>(null);
+  const [generationStage, setGenerationStage] = useState<AIGenerationStage | null>(null);
+  const [modelProgress, setModelProgress] = useState<AIModelProgress | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const cancelledRequests = useRef(new Set<string>());
   const pendingNavigationRef = useRef(false);
@@ -106,7 +123,11 @@ export default function NoteEditorScreen() {
   }, [editor, id, service]);
 
   const refreshAIAvailability = useCallback(async () => {
-    setAiAvailability(await aiProvider.availability());
+    try {
+      setAiAvailability(await aiProvider.availability());
+    } catch {
+      setAiAvailability({ available: false, status: 'unavailable', message: 'On-device AI could not be checked. Your notes still work.' });
+    }
   }, [aiProvider]);
 
   useEffect(() => {
@@ -152,6 +173,10 @@ export default function NoteEditorScreen() {
   useEffect(() => () => {
     if (activeRequest) void aiProvider.cancel(activeRequest).catch(() => {});
   }, [activeRequest, aiProvider]);
+
+  useEffect(() => () => {
+    void aiProvider.cancelModelDownload().catch(() => {});
+  }, [aiProvider]);
 
   useEffect(() => {
     const selection = pendingSourceSelection.current;
@@ -243,6 +268,43 @@ export default function NoteEditorScreen() {
     }
   }, [colors.highlight, commentText, editor, id, pendingAnchor, pendingSelection, service, title]);
 
+  const downloadLocalModel = useCallback(async () => {
+    setModelError(null);
+    setModelProgress({ phase: 'downloading', fraction: 0, bytesWritten: 0, totalBytes: LOCAL_MODEL.sizeBytes });
+    try {
+      await aiProvider.downloadModel(setModelProgress);
+    } catch (error) {
+      if (!(error instanceof Error && /cancel/i.test(error.message))) setModelError(modelDownloadErrorMessage(error));
+    } finally {
+      setModelProgress(null);
+      await refreshAIAvailability();
+    }
+  }, [aiProvider, refreshAIAvailability]);
+
+  const cancelModelDownload = useCallback(async () => {
+    try {
+      await aiProvider.cancelModelDownload();
+    } catch {
+      setModelError('The model download could not be cancelled. It has not changed your notes.');
+    }
+  }, [aiProvider]);
+
+  const removeLocalModel = useCallback(() => {
+    Alert.alert('Remove the downloaded model?', 'AI will use Apple Intelligence when available. Otherwise, you will need to download the model again.', [
+      { text: 'Keep model', style: 'cancel' },
+      {
+        text: 'Remove model',
+        style: 'destructive',
+        onPress: () => {
+          setModelError(null);
+          void aiProvider.deleteModel()
+            .then(refreshAIAvailability)
+            .catch(() => setModelError('The downloaded model could not be removed. Try again.'));
+        },
+      },
+    ]);
+  }, [aiProvider, refreshAIAvailability]);
+
   const runAI = useCallback(async (action: AIAction) => {
     if (!aiAvailability.available) return;
     let requestID: string | null = null;
@@ -267,8 +329,9 @@ export default function NoteEditorScreen() {
       const nextRequestID = aiProvider.createRequestID();
       requestID = nextRequestID;
       setActiveRequest(nextRequestID);
+      setGenerationStage('preparing');
       editor.setEditable(false);
-      const output = (await aiProvider.generate(nextRequestID, action, input)).trim();
+      const output = (await aiProvider.generate(nextRequestID, action, input, setGenerationStage)).trim();
       if (cancelledRequests.current.has(nextRequestID)) return;
       if (!output) throw new Error('The on-device model returned an empty result.');
       setReview({ action, text: output.slice(0, 12_000), selection });
@@ -286,6 +349,7 @@ export default function NoteEditorScreen() {
         cancelledRequests.current.delete(requestID);
         setActiveRequest((current) => current === requestID ? null : current);
       }
+      setGenerationStage(null);
     }
   }, [aiAvailability.available, aiProvider, editor]);
 
@@ -294,6 +358,7 @@ export default function NoteEditorScreen() {
     cancelledRequests.current.add(activeRequest);
     try { await aiProvider.cancel(activeRequest); } catch { /* The note is unchanged if cancellation arrives late. */ }
     editor.setEditable(true);
+    setGenerationStage(null);
     setActiveRequest((current) => current === activeRequest ? null : current);
     setSheet(null);
   }, [activeRequest, aiProvider, editor]);
@@ -422,7 +487,7 @@ export default function NoteEditorScreen() {
           <ActionButton label="Redo" compact onPress={() => editor.redo()} accessibilityLabel="Redo last edit" testID="editor-redo" />
           <ActionButton label={`Comments ${annotations.length || ''}`} compact onPress={() => setSheet('comments')} accessibilityLabel={`Open ${annotations.length} comments`} testID="open-comments" />
           <ActionButton label="Comment" compact onPress={() => { void openCommentSheet(); }} accessibilityLabel="Comment on selected text" testID="add-comment" />
-          <ActionButton label="AI" compact onPress={() => setSheet('ai')} accessibilityLabel="Open on-device AI actions" testID="open-ai" />
+           <ActionButton label="AI" compact onPress={() => { setModelError(null); setSheet('ai'); }} accessibilityLabel="Open on-device AI actions" testID="open-ai" />
         </ScrollView>
       </EditorKeyboardAvoidingView>
 
@@ -523,23 +588,64 @@ export default function NoteEditorScreen() {
         </SafeAreaView>
       </Modal>
 
-      <Modal visible={sheet === 'ai' || activeRequest !== null} animationType="none" presentationStyle="pageSheet" onRequestClose={() => { void cancelAI(); }}>
+      <Modal
+        visible={sheet === 'ai' || activeRequest !== null || modelProgress !== null}
+        animationType="none"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          if (activeRequest) void cancelAI();
+          else if (modelProgress) void cancelModelDownload();
+          else setSheet(null);
+        }}
+      >
         <SafeAreaView style={[styles.sheetPage, { backgroundColor: colors.background }]}>
-          <View style={styles.sheetHeader}><Text accessibilityRole="header" style={[styles.sheetTitle, { color: colors.text }]}>On-device AI</Text>{!activeRequest ? <ActionButton label="Close" compact variant="quiet" onPress={() => setSheet(null)} /> : null}</View>
+          <View style={styles.sheetHeader}><Text accessibilityRole="header" style={[styles.sheetTitle, { color: colors.text }]}>On-device AI</Text>{!activeRequest && !modelProgress ? <ActionButton label="Close" compact variant="quiet" onPress={() => setSheet(null)} /> : null}</View>
           <Text style={[styles.sheetHint, { color: colors.secondary }]}>{aiAvailability.message}</Text>
-          <Text style={[styles.aiPrivacy, { color: colors.secondary }]}>Only chosen text is supplied. Nothing is sent to a remote model. You review any result before it changes your note.</Text>
-          {activeRequest ? (
+          <Text style={[styles.aiPrivacy, { color: colors.secondary }]}>Only chosen text is supplied to the on-device model. Note text is never sent over the network. You review any result before it changes your note.</Text>
+          {modelProgress ? (
             <View style={[styles.aiProgress, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <ActivityIndicator color={colors.action} size="large" accessibilityLabel="Generating on this device" />
-              <Text accessibilityRole="text" style={[styles.aiProgressText, { color: colors.text }]}>Working on this device…</Text>
+              <ActivityIndicator color={colors.action} size="large" accessibilityLabel={modelProgress.phase === 'verifying' ? 'Verifying local model' : 'Downloading local model'} />
+              <Text accessibilityRole="text" style={[styles.aiProgressText, { color: colors.text }]}>
+                {modelProgress.phase === 'verifying' ? 'Verifying the model…' : `Downloading… ${Math.round(modelProgress.fraction * 100)}%`}
+              </Text>
+              <View
+                accessibilityRole="progressbar"
+                accessibilityLabel="Local model download progress"
+                accessibilityValue={{ min: 0, max: 100, now: Math.round(modelProgress.fraction * 100) }}
+                style={[styles.aiProgressTrack, { backgroundColor: colors.border }]}
+              >
+                <View style={[styles.aiProgressFill, { backgroundColor: colors.action, width: `${Math.round(modelProgress.fraction * 100)}%` }]} />
+              </View>
+              <Text style={[styles.sheetHint, { color: colors.secondary }]}>Your notes are not part of this download.</Text>
+              <ActionButton label="Cancel download" onPress={() => { void cancelModelDownload(); }} variant="secondary" testID="cancel-model-download" />
+            </View>
+          ) : activeRequest ? (
+            <View style={[styles.aiProgress, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <ActivityIndicator color={colors.action} size="large" accessibilityLabel={generationStage === 'preparing' ? 'Preparing local model' : 'Generating on this device'} />
+              <Text accessibilityRole="text" style={[styles.aiProgressText, { color: colors.text }]}>{generationStage === 'preparing' ? 'Preparing the local model…' : 'Generating on this device…'}</Text>
               <Text style={[styles.sheetHint, { color: colors.secondary }]}>Your note is unchanged while the model works.</Text>
               <ActionButton label="Cancel" onPress={() => { void cancelAI(); }} variant="secondary" testID="cancel-ai" />
             </View>
           ) : (
             <View style={styles.aiActions}>
+              {modelError ? <Text accessibilityRole="alert" style={[styles.aiModelError, { color: colors.danger }]}>{modelError}</Text> : null}
+              {!aiAvailability.available && (aiAvailability.status === 'download_required' || aiAvailability.status === 'model_invalid') ? (
+                <View style={[styles.aiSetup, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Text style={[styles.aiSetupTitle, { color: colors.text }]}>Local model required</Text>
+                  <Text style={[styles.sheetHint, { color: colors.secondary }]}>Download {Math.ceil(LOCAL_MODEL.sizeBytes / 1_000_000)} MB from Hugging Face once. It then works offline. The system may clear this cached file when storage is low.</Text>
+                  <ActionButton
+                    label={aiAvailability.status === 'model_invalid' ? 'Download model again' : 'Download local model'}
+                    variant="primary"
+                    onPress={() => { void downloadLocalModel(); }}
+                    testID="download-ai-model"
+                    accessibilityLabel={`Download ${LOCAL_MODEL.name} local model, ${Math.ceil(LOCAL_MODEL.sizeBytes / 1_000_000)} megabytes`}
+                  />
+                </View>
+              ) : null}
               <ActionButton label="Summarize this note" variant="primary" disabled={!aiAvailability.available} onPress={() => { void runAI('summary'); }} testID="ai-summary" />
               <ActionButton label="Extract key points" disabled={!aiAvailability.available} onPress={() => { void runAI('key-points'); }} testID="ai-key-points" />
               <ActionButton label="Rewrite selected text" disabled={!aiAvailability.available} onPress={() => { void runAI('rewrite'); }} testID="ai-rewrite" />
+              {aiAvailability.modelInstalled ? <ActionButton label="Remove downloaded model" variant="quiet" onPress={removeLocalModel} testID="remove-ai-model" /> : null}
               {aiAvailability.status === 'checking' ? <ActivityIndicator color={colors.action} accessibilityLabel="Checking AI availability" /> : null}
             </View>
           )}
@@ -579,7 +685,7 @@ const styles = StyleSheet.create({
   editorFrame: { flex: 1, minHeight: 160, marginHorizontal: 12, marginTop: 3, borderWidth: 1, borderRadius: 17, overflow: 'hidden', justifyContent: 'center' },
   toolbar: { minHeight: 60, alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6 },
   sheetPage: { flex: 1, padding: 22, gap: 16 }, sheetHeader: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, sheetTitle: { flex: 1, fontFamily: 'Georgia', fontSize: 27, lineHeight: 34 }, sheetHint: { fontSize: 15, lineHeight: 22 },
-  commentOverlay: { flex: 1 }, commentBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(28, 37, 31, 0.46)' },
+  commentOverlay: { flex: 1 }, commentBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(28, 37, 31, 0.46)' },
   commentKeyboard: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
   commentDialog: { width: '100%', maxWidth: 560, height: '86%', maxHeight: 680, borderWidth: 1, borderRadius: 24, overflow: 'hidden' },
   commentSheetHeader: { minHeight: 58, paddingHorizontal: 22, paddingTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
@@ -592,7 +698,7 @@ const styles = StyleSheet.create({
   annotationList: { gap: 12, paddingBottom: 14 }, annotationCard: { borderWidth: 1, borderRadius: 16, padding: 15, gap: 9 }, annotationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   annotationStatus: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4 }, removeAnnotation: { minHeight: 44, minWidth: 56, alignItems: 'flex-end', justifyContent: 'center' }, removeAnnotationText: { fontSize: 13, fontWeight: '600' }, annotationQuote: { fontSize: 16, lineHeight: 23, fontWeight: '600' }, annotationComment: { fontSize: 15, lineHeight: 22 }, anchorHelp: { fontSize: 13, lineHeight: 19 },
   collectionOption: { minHeight: 56, borderWidth: 1, borderRadius: 15, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, collectionOptionText: { fontSize: 16, fontWeight: '600' }, collectionOptionCheck: { fontSize: 13, fontWeight: '600' },
-  aiPrivacy: { fontSize: 13, lineHeight: 20 }, aiActions: { gap: 10 }, aiProgress: { minHeight: 250, borderWidth: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center', padding: 20, gap: 13 }, aiProgressText: { fontSize: 18, fontWeight: '600' },
+  aiPrivacy: { fontSize: 13, lineHeight: 20 }, aiActions: { gap: 10 }, aiSetup: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 12 }, aiSetupTitle: { fontSize: 18, fontWeight: '700' }, aiModelError: { fontSize: 14, lineHeight: 20 }, aiProgress: { minHeight: 250, borderWidth: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center', padding: 20, gap: 13 }, aiProgressText: { fontSize: 18, fontWeight: '600' }, aiProgressTrack: { width: '100%', height: 8, borderRadius: 4, overflow: 'hidden' }, aiProgressFill: { height: '100%', borderRadius: 4 },
   refreshAvailability: { minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 'auto' }, refreshAvailabilityText: { fontSize: 14, fontWeight: '600' },
   resultBox: { flex: 1, borderWidth: 1, borderRadius: 17, maxHeight: 500 }, resultContent: { padding: 17 }, resultText: { fontSize: 16, lineHeight: 24 },
 });

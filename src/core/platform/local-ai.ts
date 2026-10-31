@@ -1,31 +1,55 @@
-import { requireOptionalNativeModule } from 'expo';
 import * as Crypto from 'expo-crypto';
-import { Platform } from 'react-native';
-import { describeAIStatus, isAIInputWithinLimit, type AIAction, type AIProvider } from '../../features/ai/provider';
+import { isAIInputWithinLimit, selectAIProviderSource, type AIProvider } from '../../features/ai/provider';
+import { downloadedModelProvider } from './downloaded-model';
+import { foundationModelsProvider } from './foundation-models';
 
-type NativeLocalAI = {
-  availability(): Promise<string>;
-  generate(requestID: string, action: AIAction, input: string): Promise<string>;
-  cancel(requestID: string): Promise<void>;
-};
-
-const nativeModule = requireOptionalNativeModule<NativeLocalAI>('LocalAI');
 export const localAIProvider: AIProvider = {
   createRequestID() {
     return Crypto.randomUUID();
   },
   async availability() {
-    if (!nativeModule) return describeAIStatus(Platform.OS === 'ios' ? 'native_module_missing' : 'unsupported_platform');
-    try { return describeAIStatus(await nativeModule.availability()); }
-    catch { return describeAIStatus('unavailable'); }
+    const [foundation, downloaded] = await Promise.all([
+      foundationModelsProvider.availability(),
+      downloadedModelProvider.availability(),
+    ]);
+    const localState = await downloadedModelProvider.localModelState();
+    const source = selectAIProviderSource(foundation.available, localState);
+    if (source === 'foundation-models') {
+      return {
+        ...foundation,
+        status: 'available:foundation-models',
+        source,
+        modelInstalled: localState === 'ready',
+      };
+    }
+    if (source === 'downloaded-model') return downloaded;
+    return downloaded;
   },
-  async generate(requestID, action, input) {
-    if (!nativeModule) throw new Error('On-device AI is not available in this build.');
+  downloadModel(onProgress) {
+    return downloadedModelProvider.downloadModel(onProgress);
+  },
+  cancelModelDownload() {
+    return downloadedModelProvider.cancelModelDownload();
+  },
+  deleteModel() {
+    return downloadedModelProvider.deleteModel();
+  },
+  async generate(requestID, action, input, onStage) {
     if (!input.trim()) throw new Error('Add some text before using an AI action.');
     if (!isAIInputWithinLimit(input)) throw new Error('On-device AI can use up to 8,000 characters at a time. Select a shorter passage and try again.');
-    return nativeModule.generate(requestID, action, input);
+    const availability = await localAIProvider.availability();
+    if (availability.source === 'foundation-models') {
+      return foundationModelsProvider.generate(requestID, action, input, onStage);
+    }
+    if (availability.source === 'downloaded-model') {
+      return downloadedModelProvider.generate(requestID, action, input, onStage);
+    }
+    throw new Error(availability.message);
   },
   async cancel(requestID) {
-    if (nativeModule) await nativeModule.cancel(requestID);
+    await Promise.allSettled([
+      foundationModelsProvider.cancel(requestID),
+      downloadedModelProvider.cancel(requestID),
+    ]);
   },
 };
