@@ -33,7 +33,7 @@ export function selectAIProviderSource(foundationAvailable: boolean, localModelS
 }
 
 const actionInstructions: Record<AIAction, string> = {
-  summary: 'Summarize the note in concise, clear prose.',
+  summary: 'Explain the context in clear, conversational language. Identify what is happening, connect the important details, and explain why they matter. Do not merely summarize or restate the note. If context is missing, say what is unclear instead of guessing.',
   rewrite: 'Rewrite the passage while preserving its meaning and tone.',
   'key-points': 'Extract the main key points as a short, readable list.',
 };

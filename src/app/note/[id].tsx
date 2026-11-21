@@ -320,7 +320,7 @@ export default function NoteEditorScreen() {
         input = (await editor.getSelectedText()).trim();
         selection = { from: selected.from, to: selected.to };
       } else input = (await editor.getText()).trim();
-      if (!input) { Alert.alert('Add some text first', 'Write a few lines before asking for a summary or key points.', [{ text: 'OK' }]); return; }
+      if (!input) { Alert.alert('Add some text first', 'Write a few lines before asking AI to explain the context or extract key points.', [{ text: 'OK' }]); return; }
       if (!isAIInputWithinLimit(input)) {
         Alert.alert('Choose a shorter passage', `On-device AI can use up to ${MAX_AI_INPUT_LENGTH.toLocaleString()} characters at a time. Select a shorter passage and try again.`, [{ text: 'OK' }]);
         return;
@@ -599,9 +599,9 @@ export default function NoteEditorScreen() {
         }}
       >
         <SafeAreaView style={[styles.sheetPage, { backgroundColor: colors.background }]}>
-          <View style={styles.sheetHeader}><Text accessibilityRole="header" style={[styles.sheetTitle, { color: colors.text }]}>On-device AI</Text>{!activeRequest && !modelProgress ? <ActionButton label="Close" compact variant="quiet" onPress={() => setSheet(null)} /> : null}</View>
+          <View style={styles.sheetHeader}><Text accessibilityRole="header" style={[styles.sheetTitle, { color: colors.text }]}>Explain this context</Text>{!activeRequest && !modelProgress ? <ActionButton label="Close" compact variant="quiet" onPress={() => setSheet(null)} /> : null}</View>
           <Text style={[styles.sheetHint, { color: colors.secondary }]}>{aiAvailability.message}</Text>
-          <Text style={[styles.aiPrivacy, { color: colors.secondary }]}>Only chosen text is supplied to the on-device model. Note text is never sent over the network. You review any result before it changes your note.</Text>
+          <Text style={[styles.aiPrivacy, { color: colors.secondary }]}>AI explains only the note text shown here and may miss context that was not written down. It stays on-device, and you review the explanation before adding it.</Text>
           {modelProgress ? (
             <View style={[styles.aiProgress, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <ActivityIndicator color={colors.action} size="large" accessibilityLabel={modelProgress.phase === 'verifying' ? 'Verifying local model' : 'Downloading local model'} />
@@ -642,7 +642,7 @@ export default function NoteEditorScreen() {
                   />
                 </View>
               ) : null}
-              <ActionButton label="Summarize this note" variant="primary" disabled={!aiAvailability.available} onPress={() => { void runAI('summary'); }} testID="ai-summary" />
+              <ActionButton label="Explain this context" variant="primary" disabled={!aiAvailability.available} onPress={() => { void runAI('summary'); }} testID="ai-summary" />
               <ActionButton label="Extract key points" disabled={!aiAvailability.available} onPress={() => { void runAI('key-points'); }} testID="ai-key-points" />
               <ActionButton label="Rewrite selected text" disabled={!aiAvailability.available} onPress={() => { void runAI('rewrite'); }} testID="ai-rewrite" />
               {aiAvailability.modelInstalled ? <ActionButton label="Remove downloaded model" variant="quiet" onPress={removeLocalModel} testID="remove-ai-model" /> : null}
